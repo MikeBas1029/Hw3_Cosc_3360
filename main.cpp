@@ -85,5 +85,24 @@ void startDisk(){       //determines what is read/write also location where read
 
 int main(int argc, char** argv) {
 
+
+
+//------------------------------------------------------------------------------------------------------------
+//File reading:
+
+    if(argc != 3){                      //error if input not provided
+        cout<< "No input argument is found.\n";
+        return 1;
+    }
+
+    ifstream file1(argv[1]);
+    if(!file1.is_open()){               //If it can't find file
+        cout<< "No file can be found.\n";
+        return 1;
+    }
+
+    string inputLine;
+
+
     return 0;
 }
