@@ -1,0 +1,3 @@
+/run/media/mike_b/Mike_s Storage/NormalFiles/Coding Files/OS_HW3/cmake-build-debug/CMakeFiles/OS_HW3.dir
+/run/media/mike_b/Mike_s Storage/NormalFiles/Coding Files/OS_HW3/cmake-build-debug/CMakeFiles/edit_cache.dir
+/run/media/mike_b/Mike_s Storage/NormalFiles/Coding Files/OS_HW3/cmake-build-debug/CMakeFiles/rebuild_cache.dir
