@@ -1,0 +1,69 @@
+RUNNING Assignment3_Input.txt
+
+
+RUNNING WITH FIFO OUTPUT:
+TOTAL Faults
+Current Page Fault For 100: 15
+Current Page Fault For 101: 18
+Current Page Fault For 102: 4
+***** TOTAL REPLACEMENT: 37 ******
+
+RUNNING LRU REPLACEMENT:
+TOTAL Faults
+Current Page Fault For 100: 14
+Current Page Fault For 101: 18
+Current Page Fault For 102: 4
+***** TOTAL REPLACEMENT: 36 ******
+
+RUNNING LRU-X REPLACEMENT:
+TOTAL Faults
+Current Page Fault For 100: 14
+Current Page Fault For 101: 10
+Current Page Fault For 102: 4
+***** TOTAL REPLACEMENT: 28 ******
+
+RUNNING LFU REPLACEMENT:
+TOTAL Faults
+Current Page Fault For 100: 13
+Current Page Fault For 101: 18
+Current Page Fault For 102: 4
+***** TOTAL REPLACEMENT: 35 ******
+
+RUNNING OPT REPLACEMENT:
+TOTAL Faults
+Current Page Fault For 100: 11
+Current Page Fault For 101: 10
+Current Page Fault For 102: 4
+***** TOTAL REPLACEMENT: 25 ******
+
+RUNNING WORKING SET REPLACEMENT:
+TOTAL Faults
+Current Page Fault For 100: 14
+Current Page Fault For 101: 18
+Current Page Fault For 102: 7
+***** TOTAL REPLACEMENT: 39 ******
+-------MIN AND MAX WORKING SET FOR EACH PROCESS-----
+PROCESS 100
+MIN: 1
+MAX: 4
+
+PROCESS 101
+MIN: 1
+MAX: 4
+
+PROCESS 102
+MIN: 1
+MAX: 4
+
+
+FROM ALL OF THESE RUNS WE CAN SEE THAT OPT PERFORMS THE BEST AS EXPECTED
+
+
+
+
+
+
+
+
+
+

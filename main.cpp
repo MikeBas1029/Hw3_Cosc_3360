@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <ctime>
+#include <queue>
 
 //compile to test g++ -o test main.cpp
 using namespace std;
@@ -27,29 +28,48 @@ struct PageEntry{
 };
 struct FrameEntry{
     int processId;
-    int pageNum;
+    int totalPageFrame;     //on disk
 };
-struct Semaphore{   //binary Semaphore for wait/signal, used from last hw assigment
-private:
-    mutex mtx;
-    condition_variable cv;
-    size_t avail;
-public:
-    explicit Semaphore(int avail_ = 1) : avail(avail_){}
+struct DiskDriver{
+    private:
+        struct DiskRequest{
+            int processId;
+            string operation;
+            int memAddr;
+            int diskAddr;
+        };
+    queue<DiskRequest> diskQueue;
 
-    void wait(){
-        unique_lock<mutex> lock(mtx);
-        cv.wait(lock,[this] {return avail > 0;});
-        avail--;
-    }
-    void signal(){
-        unique_lock<mutex> lock(mtx);
-        avail++;
-        cv.notify_one();
-    }
-    size_t available() const{
-        return avail;
-    }
+    public:
+        void startDisk(int procID, const string& operation, int memoryAddr, int diskAddr){
+            diskQueue.push({procID, operation, memoryAddr, diskAddr});
+        }
+        void processDiskRequest(){
+
+        }
+};
+
+struct Semaphore{   //binary Semaphore for wait/signal, used from last hw assigment
+    private:
+        mutex mtx;
+        condition_variable cv;
+        size_t avail;
+    public:
+        explicit Semaphore(int avail_ = 1) : avail(avail_){}
+
+        void wait(){
+            unique_lock<mutex> lock(mtx);
+            cv.wait(lock,[this] {return avail > 0;});
+            avail--;
+        }
+        void signal(){
+            unique_lock<mutex> lock(mtx);
+            avail++;
+            cv.notify_one();
+        }
+        size_t available() const{
+            return avail;
+        }
 };
 
 void Lifo(){
@@ -77,14 +97,11 @@ void Opt(){
 
 }
 
-void startDisk(){       //determines what is read/write also location where read/write for the algorithms
-
-}
-
 int main(int argc, char** argv) {
 
     vector<PageEntry> pageEntry;
     vector<FrameEntry> fameEntry;
+    Semaphore accessSema(1);
 
 //------------------------------------------------------------------------------------------------------------
 //File reading:
@@ -123,8 +140,20 @@ int main(int argc, char** argv) {
             }
         }
     }
+
+    FrameEntry entries;
+    int count = 0;
     while(getline(file1, inputLine)){   //reading the processes,
-                                              //it will use semaphores for proper scheduling through all algorithms
+        stringstream str(inputLine);
+        while(str >> numVal){
+            if(count == 0) {                  //to determine the process id and page frames
+                entries.processId = numVal;
+            }else{
+                entries.totalPageFrame = numVal;
+            }
+            count++;
+        }
+        count = 0;
     }
 
 
