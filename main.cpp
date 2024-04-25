@@ -26,10 +26,8 @@ struct PageEntry{
     bool valid;
 };
 struct FrameEntry{
-    int addSpace;
+    int processId;
     int pageNum;
-    int forwardLink;
-    int backwardLink;
 };
 struct Semaphore{   //binary Semaphore for wait/signal, used from last hw assigment
 private:
@@ -85,12 +83,13 @@ void startDisk(){       //determines what is read/write also location where read
 
 int main(int argc, char** argv) {
 
-
+    vector<PageEntry> pageEntry;
+    vector<FrameEntry> fameEntry;
 
 //------------------------------------------------------------------------------------------------------------
 //File reading:
 
-    if(argc != 3){                      //error if input not provided
+    if(argc != 2){                      //error if input not provided
         cout<< "No input argument is found.\n";
         return 1;
     }
@@ -102,6 +101,31 @@ int main(int argc, char** argv) {
     }
 
     string inputLine;
+    int numVal;
+    for(int i = 0; i < 7; i++){         //to get the first designated values
+        getline(file1, inputLine);
+        stringstream str(inputLine);
+        while (str >> numVal){
+            if(numVal == 0){            //total page in the main mem.
+
+            }else if(numVal == 1){      //page size
+
+            }else if(numVal == 2){      //num of page frames per process (LIFO, MRU, LRU-K, LFU, and OPT)
+
+            }else if(numVal == 3){      //window size (OPT, X for LRU-X, 0 for others that don't use this)
+
+            }else if(numVal == 4){      //Min Free pool size
+
+            }else if(numVal == 5){      //Max free pool size
+
+            }else if(numVal == 6){      //total num processes
+
+            }
+        }
+    }
+    while(getline(file1, inputLine)){   //reading the processes,
+                                              //it will use semaphores for proper scheduling through all algorithms
+    }
 
 
     return 0;
