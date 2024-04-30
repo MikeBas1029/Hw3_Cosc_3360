@@ -1,11 +1,10 @@
 #include <iostream>
-#include <map>
+#include <unordered_map>
 #include <vector>
 #include <string>
 #include <sstream>
 #include <fstream>
 #include <algorithm>
-#include <limits>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -17,34 +16,73 @@
 #include <cstdlib>
 #include <ctime>
 #include <queue>
+#include <list>
+#include <unordered_set>
 
 //compile to test g++ -o test main.cpp
 using namespace std;
 
-//The struct for pages
-struct PageEntry{
-    int frameNum;
-    bool valid;
+//The struct for pages, this isn't standard to have this function contain a class, but I am tired ok ;-;
+struct Page{
+    public:
+        int pageNum;
+        int lastUsedTime;
+        int accessCount;
+
+        Page(int p):pageNum(p), lastUsedTime(0), accessCount(0){}
 };
-struct FrameEntry{
-    int processId;
-    int totalPageFrame;     //on disk
+struct VirtualMem{
+    private:
+        int totalPageFrames;
+        unordered_map<int, Page*> pageTable;
+        list<Page*> lruList;                    //for LRU
+        unordered_map<int, int> accessCounts;   //for LFU
+        queue<int> fifoQueue;                   //for LIFO
+        vector<int> optRef;                     //for OPT
+        unordered_map<int, unordered_set<int>> ws;  //for WS
+
+    public:
+        VirtualMem(int tp) : totalPageFrames(tp) {}
+
+        void pageLIFO(){
+
+        }
+        void pageLRU(){
+
+        }
+        void pageLFU(){
+
+        }
+        void pageOPT(){
+
+        }
+        void pageWS(){
+
+        }
 };
+
 struct DiskDriver{
     private:
+        mutex queueMutex;
+        condition_variable diskDriveSem;
         struct DiskRequest{
             int processId;
+            bool readOrWrite;
             string operation;
+            int frameIndex;
             int memAddr;
             int diskAddr;
         };
     queue<DiskRequest> diskQueue;
 
     public:
-        void startDisk(int procID, const string& operation, int memoryAddr, int diskAddr){
-            diskQueue.push({procID, operation, memoryAddr, diskAddr});
+        void startDisk(int procID, bool readOrWrite, const string& operation, int memoryAddr, int diskAddr){
+            diskQueue.push({procID, readOrWrite, operation, memoryAddr, diskAddr});
         }
-        void processDiskRequest(){
+        void pageFault(){
+
+        }
+        void diskRequest(){
 
         }
 };
@@ -72,35 +110,12 @@ struct Semaphore{   //binary Semaphore for wait/signal, used from last hw assigm
         }
 };
 
-void Lifo(){
-
-}
-void Mru(){
-
-}
-void Lru1(){
-
-};
-void Lru2(){
-
-};
-void LruK(){
-
-}
-void Lfu(){
-
-}
-void Ws(){
-
-};
-void Opt(){
-
+int HexToDec(string n) {
+    return stoi(n, 0, 16);
 }
 
 int main(int argc, char** argv) {
 
-    vector<PageEntry> pageEntry;
-    vector<FrameEntry> fameEntry;
     Semaphore accessSema(1);
 
 //------------------------------------------------------------------------------------------------------------
@@ -141,15 +156,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    FrameEntry entries;
     int count = 0;
     while(getline(file1, inputLine)){   //reading the processes,
         stringstream str(inputLine);
         while(str >> numVal){
             if(count == 0) {                  //to determine the process id and page frames
-                entries.processId = numVal;
+
             }else{
-                entries.totalPageFrame = numVal;
+
             }
             count++;
         }
