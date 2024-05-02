@@ -91,7 +91,20 @@ struct VirtualMem{
 
 
         void pageLIFO(int diskAddr, int memAddr){
+            for (auto it = lifo.begin(); it != lifo.end(); ++it) {
+            if (it->diskAddr == diskAddr) {
+                lifo.erase(it);
+                break;
+            }
+        }
 
+        // If stack is full, remove the least recently used page
+        if (lifo.size() == maxPoolSize) {
+            lifo.pop_back();
+        }
+
+        // Add new page to the top of the stack
+        stack.push_back(Page(page_num, disk_address));
         }
         void printLifo() const{
             cout<< "Running LIFO:\n";
