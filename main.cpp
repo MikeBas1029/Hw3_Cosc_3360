@@ -104,7 +104,7 @@ struct VirtualMem{
         }
 
         // Add new page to the top of the stack
-        stack.push_back(Page(page_num, disk_address));
+        lifo.push_back(Page(diskAddr, memAddr));
         }
         void printLifo() const{
             cout<< "Running LIFO:\n";
