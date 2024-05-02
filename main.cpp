@@ -67,9 +67,12 @@ struct VirtualMem{
         int totalPageFrames;                    //for LIFO, MRU, LRU-K, LFU, OPT. For WS it is delta
         int minPoolSize;
         int maxPoolSize;
-        int lifoTotal, lruTotal, lfuTotal, optTotal, wsTotal;
+        int pageFaults = 0;
+        int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0;
+        int windowSize;
+        int currentIndex = 0;                   //for OPT
         //int freePageFrames;
-        unordered_map<int, Page*> pageTable;
+        unordered_map<int, int> pageTable;      //key is diskAddr and pair is memAddr
         list<Page*> lruList;                    //for LRU
         unordered_map<int, int> accessCounts;   //for LFU
         stack<int> lifoStack;                   //for LIFO
@@ -91,117 +94,185 @@ struct VirtualMem{
             freePageFrames++;
         }
          */
-
-        /*chatgpt code
-         // Page replacement algorithm: LIFO
-    void pageLIFO(int pageNum) {
-        if (freePageFrames > 0) {
-            // If there are free page frames, allocate the page
-            pageTable[pageNum] = new Page(pageNum);
-            lruList.push_front(pageTable[pageNum]);
-            decreaseFreePageFrames();
-        } else {
-            // If no free page frames, evict the last page (LIFO)
-            int lastPage = lruList.back()->pageNum;
-            lruList.pop_back();
-            pageTable.erase(lastPage);
-            pageTable[pageNum] = new Page(pageNum);
-            lruList.push_front(pageTable[pageNum]);
+        void setDelta(int val){
+            windowSize = val;
         }
-    }
 
-    // Page replacement algorithm: LRU
-    void pageLRU(int pageNum) {
-        if (freePageFrames > 0) {
-            // If there are free page frames, allocate the page
-            pageTable[pageNum] = new Page(pageNum);
-            lruList.push_front(pageTable[pageNum]);
-            decreaseFreePageFrames();
-        } else {
-            // If no free page frames, evict the least recently used page (LRU)
-            int lastPage = lruList.back()->pageNum;
-            lruList.pop_back();
-            pageTable.erase(lastPage);
-            pageTable[pageNum] = new Page(pageNum);
-            lruList.push_front(pageTable[pageNum]);
-        }
-    }
-
-    // Page replacement algorithm: LFU
-    void pageLFU(int pageNum) {
-        if (freePageFrames > 0) {
-            // If there are free page frames, allocate the page
-            pageTable[pageNum] = new Page(pageNum);
-            accessCounts[pageNum] = 1;
-            decreaseFreePageFrames();
-        } else {
-            // If no free page frames, evict the least frequently used page (LFU)
-            int minAccessCount = INT_MAX;
-            int leastFrequentPage = -1;
-            for (auto it = accessCounts.begin(); it != accessCounts.end(); ++it) {
-                if (it->second < minAccessCount) {
-                    minAccessCount = it->second;
-                    leastFrequentPage = it->first;
-                }
-            }
-            pageTable.erase(leastFrequentPage);
-            accessCounts.erase(leastFrequentPage);
-            pageTable[pageNum] = new Page(pageNum);
-            accessCounts[pageNum] = 1;
-        }
-    }
-
-    // Page replacement algorithm: OPT
-    void pageOPT(int pageNum) {
-        if (freePageFrames > 0) {
-            // If there are free page frames, allocate the page
-            pageTable[pageNum] = new Page(pageNum);
-            optRef.push_back(pageNum);
-            decreaseFreePageFrames();
-        } else {
-            // If no free page frames, evict the page with the farthest reference in the future (OPT)
-            int farthestRefIndex = -1;
-            int farthestRefPage = -1;
-            for (int i = 0; i < optRef.size(); ++i) {
-                bool found = false;
-                for (int j = i + 1; j < optRef.size(); ++j) {
-                    if (optRef[j] == optRef[i]) {
-                        found = true;
-                        if (j > farthestRefIndex) {
-                            farthestRefIndex = j;
-                            farthestRefPage = optRef[i];
-                        }
-                        break;
-                    }
-                }
-                if (!found) {
-                    farthestRefPage = optRef[i];
-                    break;
-                }
-            }
-            pageTable.erase(farthestRefPage);
-            optRef.erase(optRef.begin());
-            pageTable[pageNum] = new Page(pageNum);
-            optRef.push_back(pageNum);
-        }
-    }
-         */
 
         void pageLIFO(int diskAddr, int memAddr){
-            int pageFaults = 0;
+            if(lifoStack.size() < maxPoolSize){
+                if(pageTable.find(memAddr) == pageTable.end()){
+                    //lifoTotal++;
+                    //Page* newPage = new Page(memAddr);
+                    pageTable[diskAddr] = memAddr;
+                    lifoStack.push(memAddr);
+                }
+            }else{
+                if(pageTable.find(memAddr) == pageTable.end()){
+                    int lastPage = lifoStack.top();
+                    lifoStack.pop();
+                    pageTable.erase(lastPage);
+
+                    lifoTotal++;
+                    //Page* newPage = new Page(memAddr);
+                    pageTable[diskAddr] = memAddr;
+                    lifoStack.push(memAddr);
+                }
+            }
 
         }
-        void pageLRU(){
-
+        void printLifo() const{
+            cout<< "Running LIFO:\n";
+            cout<< "Page replacements: "<< lifoTotal<< endl;
         }
-        void pageLFU(){
 
+        void pageLRU(int diskAddr, int memAddr){
+            if (lruList.size() < maxPoolSize) {
+                if (pageTable.find(memAddr) == pageTable.end()) {
+                    Page* newPage = new Page(memAddr);
+                    pageTable[diskAddr] = memAddr;
+                    lruList.push_front(newPage);
+                }
+                else {
+                    // If the page is already in memory, move it to the front of the list
+                    auto it = find_if(lruList.begin(), lruList.end(), [&](const Page* p) {
+                        return p->pageNum == pageTable[memAddr];
+                    });
+                    if (it != lruList.end()) {
+                        lruList.splice(lruList.begin(), lruList, it);
+                    }
+                }
+            }
+            else {
+                if (pageTable.find(memAddr) == pageTable.end()) {
+                    // If there's no free space, evict the least recently used page
+                    Page* lruPage = lruList.back();
+                    pageTable.erase(lruPage->pageNum); // Remove from page table
+                    lruList.pop_back(); // Remove from the end of the list
+
+                    // Add the new page to memory
+                    Page* newPage = new Page(memAddr);
+                    pageTable[diskAddr] = memAddr;
+                    lruList.push_front(newPage);
+                    lruTotal++;
+                }
+                else {
+                    // If the page is already in memory, move it to the front of the list
+                    auto it = find_if(lruList.begin(), lruList.end(), [&](const Page* p) {
+                        return p->pageNum == pageTable[memAddr];
+                    });
+                    if (it != lruList.end()) {
+                        lruList.splice(lruList.begin(), lruList, it);
+                    }
+                }
+            }
         }
-        void pageOPT(){
-
+        void printLru() const{
+            cout<< "Running LRU:\n";
+            cout<< "Page replacements: "<< lruTotal<< endl;
         }
-        void pageWS(){
 
+        void pageLFU(int diskAddr, int memAddr){
+            if (pageTable.find(memAddr) == pageTable.end()) {
+                // If the page is not in memory
+                if (pageTable.size() < maxPoolSize) {
+                    // If there's free space in memory
+                    pageTable[memAddr] = diskAddr;
+                    accessCounts[memAddr] = 1; // Initialize access count to 1
+                }
+                else {
+                    // If there's no free space, find the page with the lowest access count
+                    int minAccessCount = INT_MAX;
+                    int pageToEvict = -1;
+                    for (auto it = accessCounts.begin(); it != accessCounts.end(); ++it) {
+                        if (it->second < minAccessCount) {
+                            minAccessCount = it->second;
+                            pageToEvict = it->first;
+                        }
+                    }
+                    // Evict the page with the lowest access count
+                    pageTable.erase(pageToEvict);
+                    accessCounts.erase(pageToEvict);
+                    // Add the new page to memory
+                    pageTable[memAddr] = diskAddr;
+                    accessCounts[memAddr] = 1; // Initialize access count to 1
+                    lfuTotal++;
+                }
+            }
+            else {
+                // If the page is already in memory, update its access count
+                accessCounts[memAddr]++;
+            }
+        }
+        void printLfu() const{
+            cout << "Running LFU:\n";
+            cout << "Page replacements: " << lfuTotal << endl;
+        }
+
+        void pageOPT(int diskAddr, int memAddr){
+            if (pageTable.find(memAddr) == pageTable.end()) {
+                // If the page is not in memory
+                if (pageTable.size() < maxPoolSize) {
+                    // If there's free space in memory
+                    pageTable[memAddr] = diskAddr;
+                }
+                else {
+                    // If there's no free space, find the page with the furthest future reference
+                    int furthestFutureIndex = -1;
+                    int pageToEvict = -1;
+                    for (const auto& entry : pageTable) {
+                        int pageNum = entry.second;
+                        int futureIndex = INT_MAX;
+                        auto it = find(optRef.begin() + currentIndex, optRef.end(), pageNum);
+                        if (it != optRef.end()) {
+                            futureIndex = distance(optRef.begin(), it);
+                        }
+                        if (futureIndex > furthestFutureIndex) {
+                            furthestFutureIndex = futureIndex;
+                            pageToEvict = pageNum;
+                        }
+                    }
+                    // Evict the page with the furthest future reference
+                    pageTable.erase(pageToEvict);
+                    // Add the new page to memory
+                    pageTable[memAddr] = diskAddr;
+                    optTotal++;
+                }
+            }
+        }
+        void printOpt() const{
+            cout << "Running OPT:\n";
+            cout << "Page replacements: " << optTotal << endl;
+        }
+
+        void pageWS(int diskAddr, int memAddr){
+            ws[memAddr].insert(diskAddr);
+
+            if (pageTable.find(memAddr) == pageTable.end()) {
+                // If the page is not in memory
+                if (pageTable.size() < maxPoolSize) {
+                    // If there's free space in memory
+                    pageTable[memAddr] = diskAddr;
+                }
+                else {
+                    // If there's no free space, evict the page that is outside the window
+                    for (auto it = pageTable.begin(); it != pageTable.end();) {
+                        if (ws.find(it->first) == ws.end()) {
+                            it = pageTable.erase(it);
+                        }
+                        else {
+                            ++it;
+                        }
+                    }
+                    // Add the new page to memory
+                    pageTable[memAddr] = diskAddr;
+                    wsTotal++;
+                }
+            }
+        }
+        void printWs() const{
+            cout << "Running Working Set:\n";
+            cout << "Page replacements: " << wsTotal << endl;
         }
 };
 
@@ -209,10 +280,13 @@ struct DiskDriver{
     private:
         mutex queueMutex;
         condition_variable diskCon;
+        bool finished;
 
     queue<string> diskQueue;
 
     public:
+        DiskDriver() : finished(false){}
+
         void startDisk(const string& inputLine){
             {
                 unique_lock<mutex> lock(queueMutex);
@@ -222,7 +296,7 @@ struct DiskDriver{
         }
 
         void diskRequest(VirtualMem& vm){             //this will call every page algorithm with proper scheduling
-            while(true){
+            while(!diskQueue.empty()){
                 string inputLine;
 
                 unique_lock<mutex> lock(queueMutex);
@@ -233,7 +307,8 @@ struct DiskDriver{
 
                 lock.unlock();
 
-                if(inputLine.empty()){
+                if(inputLine.empty() || inputLine == "\r"){
+                    finished = true;
                     break;
                 }
 
@@ -245,11 +320,14 @@ struct DiskDriver{
             stringstream str(inputLine);
             int memoryAddr, diskAddr;
             str >> diskAddr>> hex>> memoryAddr;
-            cout<< "Disk location: "<< diskAddr<< "   Disk num: "<< memoryAddr<< endl;
+            //cout<< "Disk location: "<< diskAddr<< "   Disk num: "<< memoryAddr<< endl;
 
             //page replacement algorithms
             vm.pageLIFO(diskAddr, memoryAddr);
-
+            vm.pageLRU(diskAddr, memoryAddr);
+            vm.pageLFU(diskAddr, memoryAddr);
+            vm.pageOPT(diskAddr, memoryAddr);
+            vm.pageWS(diskAddr, memoryAddr);
 
             diskCon.notify_one();
         }
@@ -306,16 +384,23 @@ int main(int argc, char** argv) {
     }
 
     VirtualMem virtualMem(tp, min, max);
+    virtualMem.setDelta(x);
     DiskDriver diskDriver;
 
     while(getline(file1, inputLine)){   //reading the processes,
         diskDriver.startDisk(inputLine);
     }
+
     file1.close();
 
     thread diskThread([&]() {diskDriver.diskRequest(virtualMem);});     //lambda function to pass the functions
-
     diskThread.join();
+
+    virtualMem.printLifo();
+    virtualMem.printLru();
+    virtualMem.printLfu();
+    virtualMem.printOpt();
+    virtualMem.printWs();
 
     return 0;
 }
