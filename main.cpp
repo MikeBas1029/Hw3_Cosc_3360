@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <iomanip>
 #include <stack>
+#include <climits>
 
 //compile to test g++ -o test main.cpp
 using namespace std;
@@ -56,10 +57,10 @@ Semaphore accessSema(1);
 struct Page{
     public:
         int pageNum;
-        int lastUsedTime;
+        int diskAddr;
         int accessCount;
 
-        Page(int p):pageNum(p), lastUsedTime(0), accessCount(0){}
+        Page():pageNum(0), diskAddr(0), accessCount(0){}
 };
 
 struct VirtualMem{
@@ -71,54 +72,25 @@ struct VirtualMem{
         int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0;
         int windowSize;
         int currentIndex = 0;                   //for OPT
-        //int freePageFrames;
         unordered_map<int, int> pageTable;      //key is diskAddr and pair is memAddr
         list<Page*> lruList;                    //for LRU
         unordered_map<int, int> accessCounts;   //for LFU
-        stack<int> lifoStack;                   //for LIFO
+        vector<Page> lifo;                   //for LIFO
         vector<int> optRef;                     //for OPT
         unordered_map<int, unordered_set<int>> ws;  //for WS
 
     public:
         VirtualMem(int tp, int minPool, int maxPool) : totalPageFrames(tp), maxPoolSize(maxPool), minPoolSize(minPool) {}
 
-        /*int getFree() const{
-            return freePageFrames;
-        }
-
-        void decreaseFree(){
-            freePageFrames--;
-        }
-
-        void increaseFree(){
-            freePageFrames++;
-        }
-         */
         void setDelta(int val){
             windowSize = val;
+        }
+        void clearPageTable() {
+            pageTable.clear();
         }
 
 
         void pageLIFO(int diskAddr, int memAddr){
-            if(lifoStack.size() < maxPoolSize){
-                if(pageTable.find(memAddr) == pageTable.end()){
-                    //lifoTotal++;
-                    //Page* newPage = new Page(memAddr);
-                    pageTable[diskAddr] = memAddr;
-                    lifoStack.push(memAddr);
-                }
-            }else{
-                if(pageTable.find(memAddr) == pageTable.end()){
-                    int lastPage = lifoStack.top();
-                    lifoStack.pop();
-                    pageTable.erase(lastPage);
-
-                    lifoTotal++;
-                    //Page* newPage = new Page(memAddr);
-                    pageTable[diskAddr] = memAddr;
-                    lifoStack.push(memAddr);
-                }
-            }
 
         }
         void printLifo() const{
@@ -126,12 +98,12 @@ struct VirtualMem{
             cout<< "Page replacements: "<< lifoTotal<< endl;
         }
 
-        void pageLRU(int diskAddr, int memAddr){
+        /*void pageLRU(int diskAddr, int memAddr){
             if (lruList.size() < maxPoolSize) {
                 if (pageTable.find(memAddr) == pageTable.end()) {
-                    Page* newPage = new Page(memAddr);
+                    //Page* newPage = new Page(memAddr);
                     pageTable[diskAddr] = memAddr;
-                    lruList.push_front(newPage);
+                    //lruList.push_front(newPage);
                 }
                 else {
                     // If the page is already in memory, move it to the front of the list
@@ -151,9 +123,9 @@ struct VirtualMem{
                     lruList.pop_back(); // Remove from the end of the list
 
                     // Add the new page to memory
-                    Page* newPage = new Page(memAddr);
+                    //Page* newPage = new Page(memAddr);
                     pageTable[diskAddr] = memAddr;
-                    lruList.push_front(newPage);
+                    //lruList.push_front(newPage);
                     lruTotal++;
                 }
                 else {
@@ -255,9 +227,10 @@ struct VirtualMem{
                     pageTable[memAddr] = diskAddr;
                 }
                 else {
-                    // If there's no free space, evict the page that is outside the window
+                    // If there's no free space, evict the page outside the window
                     for (auto it = pageTable.begin(); it != pageTable.end();) {
-                        if (ws.find(it->first) == ws.end()) {
+                        if (ws.find(it->first) == ws.end() && ws[it->first].empty()) {
+                            // Evict pages outside the window that have no recent accesses
                             it = pageTable.erase(it);
                         }
                         else {
@@ -274,6 +247,7 @@ struct VirtualMem{
             cout << "Running Working Set:\n";
             cout << "Page replacements: " << wsTotal << endl;
         }
+         */
 };
 
 struct DiskDriver{
@@ -323,12 +297,15 @@ struct DiskDriver{
             //cout<< "Disk location: "<< diskAddr<< "   Disk num: "<< memoryAddr<< endl;
 
             //page replacement algorithms
+            accessSema.signal();
+
             vm.pageLIFO(diskAddr, memoryAddr);
-            vm.pageLRU(diskAddr, memoryAddr);
+            /*vm.pageLRU(diskAddr, memoryAddr);
             vm.pageLFU(diskAddr, memoryAddr);
             vm.pageOPT(diskAddr, memoryAddr);
             vm.pageWS(diskAddr, memoryAddr);
-
+            accessSema.wait();
+            */
             diskCon.notify_one();
         }
 
