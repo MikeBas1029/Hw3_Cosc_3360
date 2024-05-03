@@ -19,6 +19,7 @@
 #include <iomanip>
 #include <stack>
 #include <climits>
+#include <map>
 
 //compile to test g++ -o test main.cpp
 using namespace std;
@@ -54,13 +55,33 @@ Semaphore accessSema(1);
 
 //------------------------------------------------------------------------------------------------------------
 //Structs and functions... this isn't standard to have these functions contain a class being a struct, but I am tired ok ;-;
+struct Node{            //for LRU
+    int diskAddr;
+    int memAddr;
+    Node* prev;
+    Node* next;
+
+    Node(int dA, int mA): diskAddr(dA), memAddr(mA), prev(nullptr), next(nullptr){}
+};
+
+struct NodeLfu{        //for LFU
+    int diskAddr; // Disk address (page number)
+    int memAddr;  // Memory address (number inside the page)
+    int freq;     // Frequency of page access
+    int timestamp; // Timestamp of last access
+    Node* prev;
+    Node* next;
+
+    NodeLfu(int dA, int mA, int ts) : diskAddr(dA), memAddr(mA), freq(1), timestamp(ts), prev(nullptr), next(nullptr) {}
+};
+
 struct Page{
     public:
         int pageNum;
         int diskAddr;
-        int accessCount;
 
-        Page():pageNum(0), diskAddr(0), accessCount(0){}
+        Page():pageNum(0), diskAddr(0){}
+        Page(int dA, int mD): pageNum(dA), diskAddr(mD){}
 };
 
 struct VirtualMem{
@@ -68,14 +89,18 @@ struct VirtualMem{
         int totalPageFrames;                    //for LIFO, MRU, LRU-K, LFU, OPT. For WS it is delta
         int minPoolSize;
         int maxPoolSize;
-        int pageFaults = 0;
         int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0;
         int windowSize;
         int currentIndex = 0;                   //for OPT
-        unordered_map<int, int> pageTable;      //key is diskAddr and pair is memAddr
-        list<Page*> lruList;                    //for LRU
+        unordered_map<int, Node*> pageTable;    //key is diskAddr and pair is memAddr (Using for LRU)
+        Node* headLru;
+        Node* tailLru;
+        unordered_map<int, Node*> pageTableLfu;
+        map<int, list<Node*>> freqMap;
+        int timestamp = 0;
         unordered_map<int, int> accessCounts;   //for LFU
-        vector<Page> lifo;                   //for LIFO
+        stack<Page> lifo;                       //for LIFO
+        unordered_set<int> lifoPageSet;         //for LIFO
         vector<int> optRef;                     //for OPT
         unordered_map<int, unordered_set<int>> ws;  //for WS
 
@@ -91,66 +116,81 @@ struct VirtualMem{
 
 
         void pageLIFO(int diskAddr, int memAddr){
-            for (auto it = lifo.begin(); it != lifo.end(); ++it) {
-            if (it->diskAddr == diskAddr) {
-                lifo.erase(it);
-                break;
+            Page newPage(diskAddr, memAddr);
+            if(lifoPageSet.find(newPage.diskAddr) == lifoPageSet.end()){        //if not in memory
+                if(lifo.size() == maxPoolSize){
+                    Page oldestPage = lifo.top();
+                    lifo.pop();
+                    lifoPageSet.erase(oldestPage.diskAddr);
+                }
+
+                lifo.push(newPage);
+                lifoPageSet.insert(newPage.diskAddr);
+                lifoTotal++;
             }
-        }
-
-        // If stack is full, remove the least recently used page
-        if (lifo.size() == maxPoolSize) {
-            lifo.pop_back();
-        }
-
-        // Add new page to the top of the stack
-        lifo.push_back(Page(diskAddr, memAddr));
         }
         void printLifo() const{
             cout<< "Running LIFO:\n";
             cout<< "Page replacements: "<< lifoTotal<< endl;
         }
 
-        /*void pageLRU(int diskAddr, int memAddr){
-            if (lruList.size() < maxPoolSize) {
-                if (pageTable.find(memAddr) == pageTable.end()) {
-                    //Page* newPage = new Page(memAddr);
-                    pageTable[diskAddr] = memAddr;
-                    //lruList.push_front(newPage);
-                }
-                else {
-                    // If the page is already in memory, move it to the front of the list
-                    auto it = find_if(lruList.begin(), lruList.end(), [&](const Page* p) {
-                        return p->pageNum == pageTable[memAddr];
-                    });
-                    if (it != lruList.end()) {
-                        lruList.splice(lruList.begin(), lruList, it);
-                    }
-                }
-            }
-            else {
-                if (pageTable.find(memAddr) == pageTable.end()) {
-                    // If there's no free space, evict the least recently used page
-                    Page* lruPage = lruList.back();
-                    pageTable.erase(lruPage->pageNum); // Remove from page table
-                    lruList.pop_back(); // Remove from the end of the list
+        void pageLRU(int diskAddr, int memAddr){
+            int key = (diskAddr << 16) | memAddr;
 
-                    // Add the new page to memory
-                    //Page* newPage = new Page(memAddr);
-                    pageTable[diskAddr] = memAddr;
-                    //lruList.push_front(newPage);
-                    lruTotal++;
+            if(pageTable.find(key) != pageTable.end()){
+                Node* page = pageTable[key];
+                if(page == headLru){
+                    return;
                 }
-                else {
-                    // If the page is already in memory, move it to the front of the list
-                    auto it = find_if(lruList.begin(), lruList.end(), [&](const Page* p) {
-                        return p->pageNum == pageTable[memAddr];
-                    });
-                    if (it != lruList.end()) {
-                        lruList.splice(lruList.begin(), lruList, it);
-                    }
+                if(page->prev){
+                    page->prev->next = page->next;
                 }
+                if(page->next){
+                    page->next->prev = page->prev;
+                }
+
+                if(page == tailLru){
+                    tailLru = tailLru->prev;
+                }
+
+                page->prev = nullptr;
+                page->next = headLru;
+                headLru->prev = page;
+                headLru = page;
+
+                return;
             }
+
+            if (pageTable.size() >= maxPoolSize) {
+                if(!tailLru){
+                    return;
+                }
+                Node* evictedPage = tailLru;
+                if(headLru == tailLru){
+                    headLru = nullptr;
+                    tailLru = nullptr;
+                }else{
+                    tailLru = tailLru->prev;
+                    tailLru->next = nullptr;
+                }
+
+                int key = (evictedPage->diskAddr << 16) | evictedPage->memAddr;
+                pageTable.erase(key);
+
+                delete evictedPage;
+            }
+
+            Node* newPage = new Node(diskAddr, memAddr);
+            pageTable[key] = newPage;
+            if(!headLru){
+                headLru = newPage;
+                tailLru = newPage;
+            }else{
+                headLru->prev = newPage;
+                newPage->next = headLru;
+                headLru = newPage;
+            }
+            lruTotal++;
         }
         void printLru() const{
             cout<< "Running LRU:\n";
@@ -158,43 +198,17 @@ struct VirtualMem{
         }
 
         void pageLFU(int diskAddr, int memAddr){
-            if (pageTable.find(memAddr) == pageTable.end()) {
-                // If the page is not in memory
-                if (pageTable.size() < maxPoolSize) {
-                    // If there's free space in memory
-                    pageTable[memAddr] = diskAddr;
-                    accessCounts[memAddr] = 1; // Initialize access count to 1
-                }
-                else {
-                    // If there's no free space, find the page with the lowest access count
-                    int minAccessCount = INT_MAX;
-                    int pageToEvict = -1;
-                    for (auto it = accessCounts.begin(); it != accessCounts.end(); ++it) {
-                        if (it->second < minAccessCount) {
-                            minAccessCount = it->second;
-                            pageToEvict = it->first;
-                        }
-                    }
-                    // Evict the page with the lowest access count
-                    pageTable.erase(pageToEvict);
-                    accessCounts.erase(pageToEvict);
-                    // Add the new page to memory
-                    pageTable[memAddr] = diskAddr;
-                    accessCounts[memAddr] = 1; // Initialize access count to 1
-                    lfuTotal++;
-                }
-            }
-            else {
-                // If the page is already in memory, update its access count
-                accessCounts[memAddr]++;
-            }
+            timestamp++;
+            int key = (diskAddr << 16) | memAddr;
+
+
         }
         void printLfu() const{
             cout << "Running LFU:\n";
             cout << "Page replacements: " << lfuTotal << endl;
         }
 
-        void pageOPT(int diskAddr, int memAddr){
+        /*void pageOPT(int diskAddr, int memAddr){
             if (pageTable.find(memAddr) == pageTable.end()) {
                 // If the page is not in memory
                 if (pageTable.size() < maxPoolSize) {
@@ -313,12 +327,12 @@ struct DiskDriver{
             accessSema.signal();
 
             vm.pageLIFO(diskAddr, memoryAddr);
-            /*vm.pageLRU(diskAddr, memoryAddr);
-            vm.pageLFU(diskAddr, memoryAddr);
-            vm.pageOPT(diskAddr, memoryAddr);
-            vm.pageWS(diskAddr, memoryAddr);
+            vm.pageLRU(diskAddr, memoryAddr);
+            //vm.pageLFU(diskAddr, memoryAddr);
+            //vm.pageOPT(diskAddr, memoryAddr);
+            //vm.pageWS(diskAddr, memoryAddr);
             accessSema.wait();
-            */
+
             diskCon.notify_one();
         }
 
@@ -388,9 +402,9 @@ int main(int argc, char** argv) {
 
     virtualMem.printLifo();
     virtualMem.printLru();
-    virtualMem.printLfu();
-    virtualMem.printOpt();
-    virtualMem.printWs();
+    //virtualMem.printLfu();
+    //virtualMem.printOpt();
+    //virtualMem.printWs();
 
     return 0;
 }
