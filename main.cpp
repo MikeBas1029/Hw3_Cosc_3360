@@ -214,12 +214,10 @@ struct VirtualMem{
         void pageLRUX(int diskAddr, int memAddr){
             int key = (diskAddr << 16) | memAddr;
 
-            // Check if the page is already in the cache
-            if (pageTableX.find(key) != pageTableX.end()) {
+            if (pageTableX.find(key) != pageTableX.end()) {    // Check if the page is already in pageTabeX
                 NodeX* page = pageTableX[key];
                 if (page != headLruX) {
-                    // Move the accessed page to the front of the list
-                    if (page->prev) {
+                    if (page->prev) {                         // Move to the front
                         page->prev->next = page->next;
                     }
                     if (page->next) {
@@ -235,18 +233,14 @@ struct VirtualMem{
                     headLruX->prev = page;
                     headLruX = page;
                 }
-                // Increment reference count for the accessed page
-                page->refCount++;
+                page->refCount++;                        //increase reference count
                 return;
             }
 
-            // New page handling
             NodeX* newPage = new NodeX(diskAddr, memAddr);
             pageTableX[key] = newPage;
 
-            // Check if the cache is full
-            if (pageTableX.size() >= totalPageFrames) {
-                // Find the page with the lowest reference count among pages exceeding the threshold
+            if (pageTableX.size() >= totalPageFrames) {     // Check if filed, if so find the page with the lowest reference count in the pages exceeding the threshold
                 lruXTotal++;
                 NodeX* pageToRemove = nullptr;
                 int minReferenceCount = INT_MAX;
@@ -258,8 +252,7 @@ struct VirtualMem{
                     }
                 }
 
-                // Remove the selected page
-                if (pageToRemove) {
+                if (pageToRemove) {                        //removing the page
                     int removeKey = (pageToRemove->diskAddr << 16) | pageToRemove->memAddr;
                     pageTable.erase(removeKey);
                     if (pageToRemove == headLruX) {
@@ -278,8 +271,7 @@ struct VirtualMem{
                 }
             }
 
-            // Add the new page to the front of the list
-            if (!headLruX) {
+            if (!headLruX) {                            //Move new page to front of list
                 headLruX = newPage;
                 tailLruX = newPage;
             } else {
@@ -287,8 +279,8 @@ struct VirtualMem{
                 newPage->next = headLruX;
                 headLruX = newPage;
             }
-            // Increment reference count for the new page
-            newPage->refCount++;
+            
+            newPage->refCount++;                       //increase referance count
         }
         void printLRUX() const{
             cout << "Running LRU-X:\n";
