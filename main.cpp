@@ -69,8 +69,8 @@ struct NodeLfu{        //for LFU
     int memAddr;  // Memory address (number inside the page)
     int freq;     // Frequency of page access
     int timestamp; // Timestamp of last access
-    Node* prev;
-    Node* next;
+    NodeLfu* prev;
+    NodeLfu* next;
 
     NodeLfu(int dA, int mA, int ts) : diskAddr(dA), memAddr(mA), freq(1), timestamp(ts), prev(nullptr), next(nullptr) {}
 };
@@ -91,17 +91,20 @@ struct VirtualMem{
         int maxPoolSize;
         int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0;
         int windowSize;
-        int currentIndex = 0;                   //for OPT
+
         unordered_map<int, Node*> pageTable;    //key is diskAddr and pair is memAddr (Using for LRU)
         Node* headLru;
         Node* tailLru;
-        unordered_map<int, Node*> pageTableLfu;
-        map<int, list<Node*>> freqMap;
+
+        unordered_map<int, NodeLfu*> pageTableLfu;
+        map<int, list<NodeLfu*>> freqMap;
         int timestamp = 0;
-        unordered_map<int, int> accessCounts;   //for LFU
+
         stack<Page> lifo;                       //for LIFO
         unordered_set<int> lifoPageSet;         //for LIFO
-        vector<int> optRef;                     //for OPT
+
+        unordered_map<int, int> nextPageUse;    //for OPT
+
         unordered_map<int, unordered_set<int>> ws;  //for WS
 
     public:
@@ -109,9 +112,6 @@ struct VirtualMem{
 
         void setDelta(int val){
             windowSize = val;
-        }
-        void clearPageTable() {
-            pageTable.clear();
         }
 
 
@@ -174,7 +174,7 @@ struct VirtualMem{
                     tailLru->next = nullptr;
                 }
 
-                int key = (evictedPage->diskAddr << 16) | evictedPage->memAddr;
+                key = (evictedPage->diskAddr << 16) | evictedPage->memAddr;
                 pageTable.erase(key);
 
                 delete evictedPage;
@@ -191,6 +191,7 @@ struct VirtualMem{
                 headLru = newPage;
             }
             lruTotal++;
+
         }
         void printLru() const{
             cout<< "Running LRU:\n";
@@ -201,6 +202,36 @@ struct VirtualMem{
             timestamp++;
             int key = (diskAddr << 16) | memAddr;
 
+            if(pageTableLfu.find(key) != pageTableLfu.end()){
+                NodeLfu* page = pageTableLfu[key];
+
+                int freq = page->freq;
+                freqMap[freq].remove(page);
+
+                if(freqMap[freq].empty()){
+                    freqMap.erase(freq);
+                }
+
+                page->freq++;
+                page->timestamp = timestamp;
+                freqMap[page->freq].push_front(page);
+            }else{
+                if(pageTableLfu.size() >= maxPoolSize){
+                    auto it = freqMap.begin();
+                    NodeLfu* pageRemove = *(it->second.begin());
+                    it->second.pop_front();
+                    if(it->second.empty()){
+                        freqMap.erase(it);
+                    }
+                    pageTableLfu.erase((pageRemove->diskAddr << 16) | pageRemove->memAddr);
+
+                    delete pageRemove;
+                }
+                NodeLfu* newPage = new NodeLfu(diskAddr, memAddr, timestamp);
+                pageTableLfu[key] = newPage;
+                freqMap[1].push_front(newPage);
+                lfuTotal++;
+            }
 
         }
         void printLfu() const{
@@ -208,36 +239,27 @@ struct VirtualMem{
             cout << "Page replacements: " << lfuTotal << endl;
         }
 
-        /*void pageOPT(int diskAddr, int memAddr){
-            if (pageTable.find(memAddr) == pageTable.end()) {
-                // If the page is not in memory
-                if (pageTable.size() < maxPoolSize) {
-                    // If there's free space in memory
-                    pageTable[memAddr] = diskAddr;
-                }
-                else {
-                    // If there's no free space, find the page with the furthest future reference
-                    int furthestFutureIndex = -1;
-                    int pageToEvict = -1;
-                    for (const auto& entry : pageTable) {
-                        int pageNum = entry.second;
-                        int futureIndex = INT_MAX;
-                        auto it = find(optRef.begin() + currentIndex, optRef.end(), pageNum);
-                        if (it != optRef.end()) {
-                            futureIndex = distance(optRef.begin(), it);
-                        }
-                        if (futureIndex > furthestFutureIndex) {
-                            furthestFutureIndex = futureIndex;
-                            pageToEvict = pageNum;
+        void pageOPT(int diskAddr, int memAddr){
+            Page page(diskAddr, memAddr);
+            nextPageUse[page.diskAddr] = numeric_limits<int>::max();
+
+            if(nextPageUse.find(diskAddr) == nextPageUse.end()){
+                optTotal++;
+                if(nextPageUse.size() >= maxPoolSize){
+                    int pageToRemove = -1;
+                    int farNextUse = -1;
+
+                    for(const auto& entry : nextPageUse){
+                        if(entry.second > farNextUse){
+                            pageToRemove = entry.first;
+                            farNextUse = entry.second;
                         }
                     }
-                    // Evict the page with the furthest future reference
-                    pageTable.erase(pageToEvict);
-                    // Add the new page to memory
-                    pageTable[memAddr] = diskAddr;
-                    optTotal++;
+                    nextPageUse.erase(pageToRemove);
                 }
+                nextPageUse[diskAddr] = numeric_limits<int>::max();
             }
+
         }
         void printOpt() const{
             cout << "Running OPT:\n";
@@ -245,28 +267,23 @@ struct VirtualMem{
         }
 
         void pageWS(int diskAddr, int memAddr){
-            ws[memAddr].insert(diskAddr);
-
-            if (pageTable.find(memAddr) == pageTable.end()) {
-                // If the page is not in memory
-                if (pageTable.size() < maxPoolSize) {
-                    // If there's free space in memory
-                    pageTable[memAddr] = diskAddr;
-                }
-                else {
-                    // If there's no free space, evict the page outside the window
-                    for (auto it = pageTable.begin(); it != pageTable.end();) {
-                        if (ws.find(it->first) == ws.end() && ws[it->first].empty()) {
-                            // Evict pages outside the window that have no recent accesses
-                            it = pageTable.erase(it);
-                        }
-                        else {
-                            ++it;
+            if(ws.find(memAddr) == ws.end()){
+                if(ws.size() >= maxPoolSize){
+                    for(auto it = ws.begin(); it != ws.end();){
+                        if(it->second.empty()){
+                            it = ws.erase(it);
+                        }else{
+                            it++;
                         }
                     }
-                    // Add the new page to memory
-                    pageTable[memAddr] = diskAddr;
-                    wsTotal++;
+                }
+                ws[memAddr].insert(diskAddr);
+                wsTotal++;
+            }
+            for(auto& entry: ws){
+                entry.second.insert(diskAddr);
+                if(entry.second.size() > windowSize){
+                    entry.second.erase(entry.second.begin());
                 }
             }
         }
@@ -274,7 +291,14 @@ struct VirtualMem{
             cout << "Running Working Set:\n";
             cout << "Page replacements: " << wsTotal << endl;
         }
-         */
+
+        void printMinAndMax() const{
+            cout<<"Min and Max Working set for all processes\n";
+
+            cout<< "Min: "<< minPoolSize<< endl;
+            cout<< "Max: "<< maxPoolSize<< endl;
+        }
+
 };
 
 struct DiskDriver{
@@ -328,9 +352,9 @@ struct DiskDriver{
 
             vm.pageLIFO(diskAddr, memoryAddr);
             vm.pageLRU(diskAddr, memoryAddr);
-            //vm.pageLFU(diskAddr, memoryAddr);
-            //vm.pageOPT(diskAddr, memoryAddr);
-            //vm.pageWS(diskAddr, memoryAddr);
+            vm.pageLFU(diskAddr, memoryAddr);
+            vm.pageOPT(diskAddr, memoryAddr);
+            vm.pageWS(diskAddr, memoryAddr);
             accessSema.wait();
 
             diskCon.notify_one();
@@ -402,9 +426,11 @@ int main(int argc, char** argv) {
 
     virtualMem.printLifo();
     virtualMem.printLru();
-    //virtualMem.printLfu();
-    //virtualMem.printOpt();
-    //virtualMem.printWs();
+    virtualMem.printLfu();
+    virtualMem.printOpt();
+    virtualMem.printWs();
+    cout<< "\n---------------------------\n\n";
+    virtualMem.printMinAndMax();
 
     return 0;
 }
