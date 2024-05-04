@@ -64,6 +64,16 @@ struct Node{            //for LRU
     Node(int dA, int mA): diskAddr(dA), memAddr(mA), prev(nullptr), next(nullptr){}
 };
 
+struct NodeX{
+    int diskAddr;
+    int memAddr;
+    int refCount; // Number of references
+    NodeX* prev;
+    NodeX* next;
+
+    NodeX(int dA, int mA): diskAddr(dA), memAddr(mA), refCount(0), prev(nullptr), next(nullptr){}
+};
+
 struct NodeLfu{        //for LFU
     int diskAddr; // Disk address (page number)
     int memAddr;  // Memory address (number inside the page)
@@ -89,12 +99,16 @@ struct VirtualMem{
         int totalPageFrames;                    //for LIFO, MRU, LRU-K, LFU, OPT. For WS it is delta
         int minPoolSize;
         int maxPoolSize;
-        int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0;
-        int windowSize;
+        int lifoTotal = 0, lruTotal = 0, lfuTotal = 0, optTotal = 0, wsTotal = 0, lruXTotal = 0;
+        int windowSize;                         //For WS and LRU-X
 
         unordered_map<int, Node*> pageTable;    //key is diskAddr and pair is memAddr (Using for LRU)
-        Node* headLru;
-        Node* tailLru;
+        Node* headLru = nullptr;
+        Node* tailLru = nullptr;
+
+        unordered_map<int, NodeX*> pageTableX;
+        NodeX* headLruX = nullptr;
+        NodeX* tailLruX = nullptr;
 
         unordered_map<int, NodeLfu*> pageTableLfu;
         map<int, list<NodeLfu*>> freqMap;
@@ -122,11 +136,12 @@ struct VirtualMem{
                     Page oldestPage = lifo.top();
                     lifo.pop();
                     lifoPageSet.erase(oldestPage.diskAddr);
+                    lifoTotal++;
                 }
 
                 lifo.push(newPage);
                 lifoPageSet.insert(newPage.diskAddr);
-                lifoTotal++;
+
             }
         }
         void printLifo() const{
@@ -139,32 +154,32 @@ struct VirtualMem{
 
             if(pageTable.find(key) != pageTable.end()){
                 Node* page = pageTable[key];
-                if(page == headLru){
-                    return;
-                }
-                if(page->prev){
-                    page->prev->next = page->next;
-                }
-                if(page->next){
-                    page->next->prev = page->prev;
-                }
+                if(page != headLru){
+                    if(page->prev){
+                        page->prev->next = page->next;
+                    }
+                    if(page->next){
+                        page->next->prev = page->prev;
+                    }
 
-                if(page == tailLru){
-                    tailLru = tailLru->prev;
+                    if(page == tailLru){
+                        tailLru = tailLru->prev;
+                    }
+
+                    page->prev = nullptr;
+                    page->next = headLru;
+                    if (headLru)
+                        headLru->prev = page;
+                    headLru = page;
                 }
-
-                page->prev = nullptr;
-                page->next = headLru;
-                headLru->prev = page;
-                headLru = page;
-
                 return;
             }
 
+            Node* newPage = new Node(diskAddr, memAddr);
+            pageTable[key] = newPage;
+
             if (pageTable.size() >= maxPoolSize) {
-                if(!tailLru){
-                    return;
-                }
+                lruTotal++;
                 Node* evictedPage = tailLru;
                 if(headLru == tailLru){
                     headLru = nullptr;
@@ -174,15 +189,13 @@ struct VirtualMem{
                     tailLru->next = nullptr;
                 }
 
-                key = (evictedPage->diskAddr << 16) | evictedPage->memAddr;
-                pageTable.erase(key);
+                int keyRemove = (evictedPage->diskAddr << 16) | evictedPage->memAddr;
+                pageTable.erase(keyRemove);
 
                 delete evictedPage;
             }
 
-            Node* newPage = new Node(diskAddr, memAddr);
-            pageTable[key] = newPage;
-            if(!headLru){
+            if(headLru == nullptr){
                 headLru = newPage;
                 tailLru = newPage;
             }else{
@@ -190,12 +203,96 @@ struct VirtualMem{
                 newPage->next = headLru;
                 headLru = newPage;
             }
-            lruTotal++;
+
 
         }
         void printLru() const{
             cout<< "Running LRU:\n";
             cout<< "Page replacements: "<< lruTotal<< endl;
+        }
+
+        void pageLRUX(int diskAddr, int memAddr){
+            int key = (diskAddr << 16) | memAddr;
+
+            // Check if the page is already in the cache
+            if (pageTableX.find(key) != pageTableX.end()) {
+                NodeX* page = pageTableX[key];
+                if (page != headLruX) {
+                    // Move the accessed page to the front of the list
+                    if (page->prev) {
+                        page->prev->next = page->next;
+                    }
+                    if (page->next) {
+                        page->next->prev = page->prev;
+                    }
+
+                    if (page == tailLruX) {
+                        tailLruX = tailLruX->prev;
+                    }
+
+                    page->prev = nullptr;
+                    page->next = headLruX;
+                    headLruX->prev = page;
+                    headLruX = page;
+                }
+                // Increment reference count for the accessed page
+                page->refCount++;
+                return;
+            }
+
+            // New page handling
+            NodeX* newPage = new NodeX(diskAddr, memAddr);
+            pageTableX[key] = newPage;
+
+            // Check if the cache is full
+            if (pageTableX.size() >= totalPageFrames) {
+                // Find the page with the lowest reference count among pages exceeding the threshold
+                lruXTotal++;
+                NodeX* pageToRemove = nullptr;
+                int minReferenceCount = INT_MAX;
+                for (auto& entry : pageTableX) {
+                    NodeX* page = entry.second;
+                    if (page->refCount <= windowSize && page->refCount < minReferenceCount) {
+                        minReferenceCount = page->refCount;
+                        pageToRemove = page;
+                    }
+                }
+
+                // Remove the selected page
+                if (pageToRemove) {
+                    int removeKey = (pageToRemove->diskAddr << 16) | pageToRemove->memAddr;
+                    pageTable.erase(removeKey);
+                    if (pageToRemove == headLruX) {
+                        headLruX = headLruX->next;
+                    }
+                    if (pageToRemove == tailLruX) {
+                        tailLruX = tailLruX->prev;
+                    }
+                    if (pageToRemove->prev) {
+                        pageToRemove->prev->next = pageToRemove->next;
+                    }
+                    if (pageToRemove->next) {
+                        pageToRemove->next->prev = pageToRemove->prev;
+                    }
+                    delete pageToRemove;
+                }
+            }
+
+            // Add the new page to the front of the list
+            if (!headLruX) {
+                headLruX = newPage;
+                tailLruX = newPage;
+            } else {
+                headLruX->prev = newPage;
+                newPage->next = headLruX;
+                headLruX = newPage;
+            }
+            // Increment reference count for the new page
+            newPage->refCount++;
+        }
+        void printLRUX() const{
+            cout << "Running LRU-X:\n";
+            cout << "Page replacements: " << lfuTotal << endl;
         }
 
         void pageLFU(int diskAddr, int memAddr){
@@ -217,6 +314,7 @@ struct VirtualMem{
                 freqMap[page->freq].push_front(page);
             }else{
                 if(pageTableLfu.size() >= maxPoolSize){
+                    lfuTotal++;
                     auto it = freqMap.begin();
                     NodeLfu* pageRemove = *(it->second.begin());
                     it->second.pop_front();
@@ -230,7 +328,6 @@ struct VirtualMem{
                 NodeLfu* newPage = new NodeLfu(diskAddr, memAddr, timestamp);
                 pageTableLfu[key] = newPage;
                 freqMap[1].push_front(newPage);
-                lfuTotal++;
             }
 
         }
@@ -244,7 +341,7 @@ struct VirtualMem{
             nextPageUse[page.diskAddr] = numeric_limits<int>::max();
 
             if(nextPageUse.find(diskAddr) == nextPageUse.end()){
-                optTotal++;
+                //optTotal++;
                 if(nextPageUse.size() >= maxPoolSize){
                     int pageToRemove = -1;
                     int farNextUse = -1;
@@ -256,6 +353,7 @@ struct VirtualMem{
                         }
                     }
                     nextPageUse.erase(pageToRemove);
+                    optTotal++;
                 }
                 nextPageUse[diskAddr] = numeric_limits<int>::max();
             }
@@ -276,9 +374,10 @@ struct VirtualMem{
                             it++;
                         }
                     }
+                    wsTotal++;
                 }
                 ws[memAddr].insert(diskAddr);
-                wsTotal++;
+
             }
             for(auto& entry: ws){
                 entry.second.insert(diskAddr);
@@ -352,6 +451,7 @@ struct DiskDriver{
 
             vm.pageLIFO(diskAddr, memoryAddr);
             vm.pageLRU(diskAddr, memoryAddr);
+            vm.pageLRUX(diskAddr, memoryAddr);
             vm.pageLFU(diskAddr, memoryAddr);
             vm.pageOPT(diskAddr, memoryAddr);
             vm.pageWS(diskAddr, memoryAddr);
@@ -426,6 +526,7 @@ int main(int argc, char** argv) {
 
     virtualMem.printLifo();
     virtualMem.printLru();
+    virtualMem.printLRUX();
     virtualMem.printLfu();
     virtualMem.printOpt();
     virtualMem.printWs();
