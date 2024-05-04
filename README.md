@@ -5,6 +5,8 @@ This c++ code simulates page replacement algorithms used for virtual memory mana
 
 The program takes input parameterrs such as total page frams, page size, number of pag frames per process, window size(used in certain algothims), minimum and maximum free pool sizes, and the total number of processes.
 
+I have use all my 3 grace periods.
+
 # How to run
   1. Complie the code my entering inside the terminal: 'g++ -o test main.cpp -pthread'
   2. Execting the compiled program in the terminal with the input files. Ex: 'Assignment3_Input./test .txt'
